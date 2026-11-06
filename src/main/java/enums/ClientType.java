@@ -1,6 +1,6 @@
 package enums;
 
-public enum InterfaceTypes {
+public enum ClientType {
     CLIENT,
     ADMIN
 }
