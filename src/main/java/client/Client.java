@@ -1,16 +1,19 @@
 package client;
 
+import com.sun.jdi.connect.spi.ClosedConnectionException;
 import enums.ClientType;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.net.ConnectException;
 import java.net.Socket;
+import java.net.UnknownHostException;
+import java.sql.SQLOutput;
 import java.util.Scanner;
 
-import static util.constants.CYAN;
-import static util.constants.DEFAULT;
+import static util.constants.*;
 
 public class Client {
 
@@ -32,9 +35,7 @@ public class Client {
         this.clientName = getClientName(scanner);
         this.clientType = getClientType(scanner);
 
-        int port = getPortNumber(scanner);
-
-        Socket socket = new Socket("localhost", port);
+        Socket socket = tryConnect();
 
         System.out.printf("%s is connected as %s to %s:%d%n", clientName, clientType, socket.getInetAddress().getHostAddress(), socket.getPort());
 
@@ -45,8 +46,14 @@ public class Client {
         out.println(this.clientName);
         out.println(this.clientType);
 
-
-
+        while (true) {
+            String input = scanner.nextLine();
+            if (input.equalsIgnoreCase("QUIT"))
+            {
+                out.println(input);
+                break;
+            }
+        }
     }
 
 
@@ -114,6 +121,30 @@ public class Client {
                 return Integer.parseInt(port);
             }
             System.out.println("Invalid port, port must be 0-65535.");
+        }
+    }
+
+    /**
+     * Utility function to help with graceful connection failure and allow for attempted retries
+     *
+     * @return Socket connection to the server.
+     */
+    private Socket tryConnect() {
+        while (true) {
+            int port = getPortNumber(scanner);
+            try {
+                return new Socket("localhost", port);
+            } catch (IOException e) {
+                System.out.println(RED + "Could not connect to Space Port Server on port " + port + ". Is the server running?" + DEFAULT);
+                System.out.println(RED + "Want to (R)try or (Q)uit?");
+
+                switch (scanner.nextLine().trim().toUpperCase()) {
+                    case "R":
+                        continue;
+                    case "Q":
+                        System.exit(0);
+                }
+            }
         }
     }
 }
