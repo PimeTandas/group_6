@@ -9,10 +9,10 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.util.Scanner;
 
-public class Client {
+import static util.constants.CYAN;
+import static util.constants.DEFAULT;
 
-    private static final String DEFAULT = "\u001B[0m";
-    private static final String CYAN = "\u001B[36m";
+public class Client {
 
     private String clientName;
     private ClientType clientType;
@@ -32,34 +32,26 @@ public class Client {
         this.clientName = getClientName(scanner);
         this.clientType = getClientType(scanner);
 
+        int port = getPortNumber(scanner);
 
-        Socket socket = new Socket("localhost", 1234);
+        Socket socket = new Socket("localhost", port);
 
         System.out.printf("%s is connected as %s to %s:%d%n", clientName, clientType, socket.getInetAddress().getHostAddress(), socket.getPort());
 
+        // Input on this port so (OUTPUT FROM SERVER)
         BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+        // Output on this port so (INPUT TO SERVER)
         PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-        Scanner keyboard = new Scanner(System.in);
+        out.println(this.clientName);
+        out.println(this.clientType);
 
-        new Thread(() -> {
-                String line;
-                while (true) {
-                    try {
-                        if (!((line = in.readLine()) != null)) break;
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                    System.out.println(line);
-                }}).start();
 
-        while (keyboard.hasNextLine()) {
-            out.println(keyboard.nextLine());
-        }
-        socket.close();
+
     }
 
+
     /***
-     * Method to print Client welcome screen.
+     * Utility function to print some funky reto ascii art
      */
     private static void printIntro(){
         System.out.println("""
@@ -76,9 +68,9 @@ public class Client {
 
     /***
      * Utility function to get the name of the client from user on client startup.
-     * Need to add some validation
+     *
      * @param scanner
-     * @return String
+     * @return The client name the user is connecting to from the terminal
      */
     private static String getClientName(Scanner scanner) {
         while (true) {
@@ -91,8 +83,9 @@ public class Client {
 
     /***
      * Utility method to get the client type on client startup.
+     *
      * @param scanner
-     * @return ClientType
+     * @return The client type the user is connecting as from the terminal
      */
     private static ClientType getClientType(Scanner scanner) {
         while (true) {
@@ -107,4 +100,20 @@ public class Client {
         }
     }
 
+    /***
+     * Utility function to get a valid port number.
+     *
+     * @param scanner
+     * @return a validated port number for client to connect to on local host
+     */
+    private static int getPortNumber(Scanner scanner) {
+        while (true) {
+            System.out.print(CYAN + "Please enter a port number: " + DEFAULT);
+            String port = scanner.nextLine().trim().toUpperCase();
+            if (port.matches("\\d{1,5}") && Integer.parseInt(port) <= 65535) {
+                return Integer.parseInt(port);
+            }
+            System.out.println("Invalid port, port must be 0-65535.");
+        }
+    }
 }
