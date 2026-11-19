@@ -1,16 +1,18 @@
 package client;
 
-import com.sun.jdi.connect.spi.ClosedConnectionException;
 import enums.ClientType;
+import protocol.Message;
+import protocol.MessageCodec;
+import protocol.Request;
+import protocol.Response;
+import protocol.EventMessage;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
-import java.net.ConnectException;
 import java.net.Socket;
-import java.net.UnknownHostException;
-import java.sql.SQLOutput;
+import java.nio.charset.StandardCharsets;
 import java.util.Scanner;
 
 import static util.constants.*;
@@ -35,27 +37,64 @@ public class Client {
         this.clientName = getClientName(scanner);
         this.clientType = getClientType(scanner);
 
-        Socket socket = tryConnect();
+        try (Socket socket = tryConnect()) {
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+            PrintWriter out = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8);
+            out.println(clientName);
+            out.println(clientType);
 
-        System.out.printf("%s is connected as %s to %s:%d%n", clientName, clientType, socket.getInetAddress().getHostAddress(), socket.getPort());
-
-        // Input on this port so (OUTPUT FROM SERVER)
-        BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-        // Output on this port so (INPUT TO SERVER)
-        PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-        out.println(this.clientName);
-        out.println(this.clientType);
-
-        while (true) {
-            String input = scanner.nextLine();
-            if (input.equalsIgnoreCase("QUIT"))
-            {
-                out.println(input);
-                break;
+            // wait for registration before accepting commands, a tcp connection alone isn't enough
+            Message handshake = MessageCodec.decode(in.readLine());
+            if (!(handshake instanceof Response response) || !response.success()) {
+                displayMessage(handshake);
+                return;
             }
+            displayMessage(handshake);
+            Thread listener = new Thread(new ServerMessageListener(in, Client::displayMessage, System.out::println), "server-listener");
+            listener.setDaemon(true);
+            listener.start();
+            System.out.println("commands: ping, list_clients (admin), help, quit");
+
+            while (!socket.isClosed() && scanner.hasNextLine()) {
+                String line = scanner.nextLine().trim();
+                if (line.equalsIgnoreCase("HELP")) {
+                    System.out.println("commands: ping, list_clients (admin), help, quit");
+                    continue;
+                }
+                try {
+                    Request request = CommandParser.parse(line);
+                    out.println(MessageCodec.encode(request));
+                    if (out.checkError()) {
+                        System.out.println("could not send command, connection closed");
+                        break;
+                    }
+                    if (request.command().equals("QUIT") && request.arguments().isEmpty()) {
+                        // allow the reader to display the goodbye response before closing the socket
+                        socket.shutdownOutput();
+                        listener.join(3000);
+                        break;
+                    }
+                } catch (IllegalArgumentException e) {
+                    System.out.println(e.getMessage());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        } catch (IllegalArgumentException e) {
+            System.out.println("invalid handshake from server");
         }
     }
 
+    private static void displayMessage(Message message) {
+        if (message instanceof Response response) {
+            String prefix = response.success() ? "ok" : "error";
+            System.out.println(prefix + " [" + response.requestId() + "]: " + response.message()
+                    + (response.data().isEmpty() ? "" : " " + response.data()));
+        } else if (message instanceof EventMessage event) {
+            System.out.println("event [" + event.timestamp() + "] " + event.eventType() + " " + event.details());
+        }
+    }
 
     /***
      * Utility function to print some funky reto ascii art
@@ -83,8 +122,10 @@ public class Client {
         while (true) {
             System.out.print(CYAN + "Please enter a client name: " + DEFAULT);
             String name = scanner.nextLine().trim();
-
-            return name;
+            if (!name.isBlank()) {
+                return name;
+            }
+            System.out.println("client name cannot be blank");
         }
     }
 

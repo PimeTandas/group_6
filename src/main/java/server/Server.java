@@ -17,6 +17,7 @@ public class Server {
     private static final int PORT = 1234;
     private ServerSocket serverSocket;
     private final ExecutorService pool = Executors.newCachedThreadPool();
+    private final ClientRegistry registry = new ClientRegistry();
 
     // Services can go here, should make sure all use synchronized methods!!!!
     ClientLogService clientLogService = new ClientLogServiceImpl();
@@ -31,7 +32,7 @@ public class Server {
         while(true) {
             try {
                 Socket socket = serverSocket.accept();
-                pool.submit(new ClientHandler(socket, clientLogService));
+                pool.submit(new ClientHandler(socket, clientLogService, registry));
             } catch (IOException e) {
                 System.out.println(RED + "Failed to handle Client connection" + DEFAULT);
             }
