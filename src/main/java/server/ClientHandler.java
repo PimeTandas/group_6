@@ -58,14 +58,19 @@ public class ClientHandler implements Runnable {
                 send(new Response("", false, "invalid client role", List.of()));
                 return;
             }
-            registered = registry.register(clientName, this);
+            // registration makes us visible to broadcasts, so send the welcome before releasing the writer
+            synchronized (sendLock) {
+                registered = registry.register(clientName, this);
+                if (registered) {
+                    send(new Response("", true, "connected as " + clientType, List.of()));
+                }
+            }
             if (!registered) {
                 send(new Response("", false, "client name is already connected", List.of()));
                 return;
             }
             socket.setSoTimeout(0);
             clientLogService.logConnected(clientName, clientType);
-            send(new Response("", true, "connected as " + clientType, List.of()));
             registry.broadcast(EventMessage.now("CLIENT_CONNECTED", Map.of("client", clientName)));
 
             String line;
