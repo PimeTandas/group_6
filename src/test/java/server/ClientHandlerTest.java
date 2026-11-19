@@ -14,8 +14,10 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -94,6 +96,64 @@ class ClientHandlerTest {
         handler.get(3, TimeUnit.SECONDS);
         assertEquals("disconnected terminal-2 CLIENT", events.poll());
         assertNull(events.poll());
+    }
+
+    @Test
+    void handlesMultipleClientsAtTheSameTime() throws Exception {
+        int clientCount = 8;
+        ExecutorService clients = Executors.newFixedThreadPool(clientCount);
+        CountDownLatch ready = new CountDownLatch(clientCount);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch quit = new CountDownLatch(1);
+        List<Future<?>> clientTasks = new ArrayList<>();
+        List<Future<?>> handlerTasks = new ArrayList<>();
+        List<String> recorded = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < clientCount; i++) {
+                Socket client = connect();
+                handlerTasks.add(startHandler());
+                String name = "terminal-" + i;
+                clientTasks.add(clients.submit(() -> {
+                    PrintWriter output = new PrintWriter(client.getOutputStream(), true);
+                    ready.countDown();
+                    assertTrue(start.await(3, TimeUnit.SECONDS));
+                    output.println(name);
+                    output.println("CLIENT");
+                    assertTrue(quit.await(3, TimeUnit.SECONDS));
+                    output.println("QUIT");
+                    return null;
+                }));
+            }
+
+            assertTrue(ready.await(3, TimeUnit.SECONDS));
+            start.countDown();
+            for (int i = 0; i < clientCount; i++) {
+                String event = events.poll(3, TimeUnit.SECONDS);
+                assertTrue(event != null && event.startsWith("connected "));
+                recorded.add(event);
+            }
+
+            quit.countDown();
+            for (Future<?> task : clientTasks) {
+                task.get(3, TimeUnit.SECONDS);
+            }
+            for (Future<?> task : handlerTasks) {
+                task.get(3, TimeUnit.SECONDS);
+            }
+            events.drainTo(recorded);
+
+            assertEquals(clientCount * 2, recorded.size());
+            for (int i = 0; i < clientCount; i++) {
+                assertEquals(1, Collections.frequency(recorded, "connected terminal-" + i + " CLIENT"));
+                assertEquals(1, Collections.frequency(recorded, "disconnected terminal-" + i + " CLIENT"));
+            }
+        } finally {
+            start.countDown();
+            quit.countDown();
+            clients.shutdownNow();
+            assertTrue(clients.awaitTermination(3, TimeUnit.SECONDS));
+        }
     }
 
     private Socket connect() throws IOException {
