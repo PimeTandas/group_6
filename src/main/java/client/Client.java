@@ -87,7 +87,10 @@ public class Client {
     }
 
     private static void printHelp() {
-        System.out.println("commands: ping, view_transports, list_clients (admin), help, quit");
+        System.out.println("commands: ping, view_transports, view_events, list_clients (admin), help, quit");
+        System.out.println("load_cargo transport=<id> amount=<units>");
+        System.out.println("unload_cargo transport=<id> amount=<units>");
+        System.out.println("transfer_cargo source=<id> destination=<id> amount=<units>");
     }
 
     private static void displayMessage(Message message) {

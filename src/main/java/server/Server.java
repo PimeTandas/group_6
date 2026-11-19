@@ -2,6 +2,8 @@ package server;
 
 import service.ClientLogService;
 import service.ClientLogServiceImpl;
+import service.CargoServiceImpl;
+import service.EventLogService;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -26,9 +28,13 @@ public class Server {
     }
 
     public Server(TransportRegistry transports) {
+        this(transports, new EventLogService());
+    }
+
+    public Server(TransportRegistry transports, EventLogService eventLog) {
         // persistence can populate this before the server starts accepting connections
         this.transports = transports;
-        this.dispatcher = new CommandDispatcher(registry, transports);
+        this.dispatcher = new CommandDispatcher(registry, transports, new CargoServiceImpl(), eventLog);
     }
 
     // Services can go here, should make sure all use synchronized methods!!!!
