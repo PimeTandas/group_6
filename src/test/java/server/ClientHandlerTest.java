@@ -273,6 +273,60 @@ class ClientHandlerTest {
         return new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
     }
 
+    @Test
+    void receivesBackgroundEventsWhileCommandsAreBeingSent() throws Exception {
+        Socket client = connect();
+        startHandler();
+        PrintWriter output = new PrintWriter(client.getOutputStream(), true);
+        BufferedReader input = reader(client);
+        output.println("listening");
+        output.println("CLIENT");
+        assertTrue(readResponse(input).success());
+        readEvent(input);
+
+        BlockingQueue<Message> received = new LinkedBlockingQueue<>();
+        BlockingQueue<String> errors = new LinkedBlockingQueue<>();
+        Future<?> listenerTask = handlers.submit(new client.ServerMessageListener(input, received::add, errors::add));
+        int count = 40;
+        CountDownLatch start = new CountDownLatch(1);
+        Future<?> broadcasts = handlers.submit(() -> {
+            assertTrue(start.await(3, TimeUnit.SECONDS));
+            for (int i = 0; i < count; i++) {
+                registry.broadcast(EventMessage.now("TEST_EVENT", Map.of("number", Integer.toString(i))));
+            }
+            return null;
+        });
+        start.countDown();
+        for (int i = 0; i < count; i++) {
+            output.println(MessageCodec.encode(new Request("ping-" + i, "PING", Map.of())));
+        }
+
+        List<String> responseIds = new ArrayList<>();
+        List<String> eventNumbers = new ArrayList<>();
+        for (int i = 0; i < count * 2; i++) {
+            Message message = received.poll(3, TimeUnit.SECONDS);
+            assertTrue(message != null, "reader should receive every response and event");
+            if (message instanceof Response response) {
+                assertTrue(response.success());
+                responseIds.add(response.requestId());
+            } else if (message instanceof EventMessage event) {
+                assertEquals("TEST_EVENT", event.eventType());
+                eventNumbers.add(event.details().get("number"));
+            }
+        }
+        broadcasts.get(3, TimeUnit.SECONDS);
+        for (int i = 0; i < count; i++) {
+            assertEquals(1, Collections.frequency(responseIds, "ping-" + i));
+            assertEquals(1, Collections.frequency(eventNumbers, Integer.toString(i)));
+        }
+        assertTrue(errors.isEmpty());
+
+        output.println(MessageCodec.encode(new Request("quit", "QUIT", Map.of())));
+        assertEquals("quit", ((Response) received.poll(3, TimeUnit.SECONDS)).requestId());
+        listenerTask.get(3, TimeUnit.SECONDS);
+        assertEquals("server connection closed", errors.poll());
+    }
+
     private Response readResponse(BufferedReader input) throws IOException {
         for (int i = 0; i < 100; i++) {
             Message message = MessageCodec.decode(input.readLine());
