@@ -144,8 +144,8 @@ class CargoSocketTest {
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
         try {
-            Future<Integer> a = pool.submit(() -> load(first, "first", ready, start));
-            Future<Integer> b = pool.submit(() -> load(second, "second", ready, start));
+            Future<Integer> a = pool.submit(() -> changeCargo(first, "first", "LOAD_CARGO", ready, start));
+            Future<Integer> b = pool.submit(() -> changeCargo(second, "second", "LOAD_CARGO", ready, start));
             assertTrue(ready.await(3, TimeUnit.SECONDS));
             start.countDown();
             int successful = a.get(10, TimeUnit.SECONDS) + b.get(10, TimeUnit.SECONDS);
@@ -159,12 +159,36 @@ class CargoSocketTest {
         }
     }
 
-    private int load(Terminal terminal, String name, CountDownLatch ready, CountDownLatch start) throws Exception {
+    @Test
+    void simultaneousUnloadsCannotGoBelowZero() throws Exception {
+        synchronized (transports.get("a")) { transports.get("a").setCurrentQuantity(100); }
+        Terminal first = connect("first");
+        Terminal second = connect("second");
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Future<Integer> a = pool.submit(() -> changeCargo(first, "first", "UNLOAD_CARGO", ready, start));
+            Future<Integer> b = pool.submit(() -> changeCargo(second, "second", "UNLOAD_CARGO", ready, start));
+            assertTrue(ready.await(3, TimeUnit.SECONDS));
+            start.countDown();
+            int successful = a.get(10, TimeUnit.SECONDS) + b.get(10, TimeUnit.SECONDS);
+            assertEquals(10, successful);
+            assertEquals(0, transports.get("a").getCurrentQuantity());
+            assertEquals(successful, eventLog.getEvents().size());
+            assertEquals(successful, eventLog.getEvents().stream()
+                    .map(event -> event.details().get("requestId")).distinct().count());
+        } finally {
+            start.countDown();
+        }
+    }
+
+    private int changeCargo(Terminal terminal, String name, String command,
+                            CountDownLatch ready, CountDownLatch start) throws Exception {
         ready.countDown();
         assertTrue(start.await(3, TimeUnit.SECONDS));
         int successful = 0;
         for (int i = 0; i < 10; i++) {
-            if (terminal.request(name + i, "LOAD_CARGO", Map.of("transport", "a", "amount", "10")).success()) {
+            if (terminal.request(name + i, command, Map.of("transport", "a", "amount", "10")).success()) {
                 successful++;
             }
         }
