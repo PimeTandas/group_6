@@ -30,6 +30,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -186,7 +187,7 @@ class ClientHandlerTest {
         assertTrue(readResponse(input).success());
 
         output.println("not a request");
-        assertTrue(!readResponse(input).success());
+        assertFalse(readResponse(input).success());
         output.println(MessageCodec.encode(new Request("ping-1", "PING", Map.of())));
         Response pong = readResponse(input);
         assertEquals("ping-1", pong.requestId());
@@ -215,7 +216,7 @@ class ClientHandlerTest {
         PrintWriter secondOutput = new PrintWriter(second.getOutputStream(), true);
         secondOutput.println("same-name");
         secondOutput.println("ADMIN");
-        assertTrue(!readResponse(reader(second)).success());
+        assertFalse(readResponse(reader(second)).success());
         secondHandler.get(3, TimeUnit.SECONDS);
         assertEquals(List.of("same-name"), registry.getConnectedClients());
 
@@ -262,7 +263,7 @@ class ClientHandlerTest {
         output.println("invalid");
         output.println(role);
         BufferedReader input = reader(client);
-        assertTrue(!readResponse(input).success());
+        assertFalse(readResponse(input).success());
         handler.get(3, TimeUnit.SECONDS);
         assertNull(input.readLine());
         assertTrue(registry.getConnectedClients().isEmpty());
@@ -271,6 +272,65 @@ class ClientHandlerTest {
 
     private BufferedReader reader(Socket socket) throws IOException {
         return new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void rejectsForbiddenAndUnknownCommandsWithoutClosingSession() throws Exception {
+        Socket client = connect();
+        Future<?> handler = startHandler();
+        PrintWriter output = new PrintWriter(client.getOutputStream(), true);
+        BufferedReader input = reader(client);
+        output.println("operator");
+        output.println("CLIENT");
+        assertTrue(readResponse(input).success());
+
+        output.println(MessageCodec.encode(new Request("denied", "LIST_CLIENTS", Map.of())));
+        Response denied = readResponse(input);
+        assertFalse(denied.success());
+        assertEquals("denied", denied.requestId());
+        assertTrue(denied.data().isEmpty());
+
+        output.println(MessageCodec.encode(new Request("unknown", "NOT_A_COMMAND", Map.of())));
+        Response unknown = readResponse(input);
+        assertFalse(unknown.success());
+        assertEquals("unknown", unknown.requestId());
+
+        output.println(MessageCodec.encode(new Request("bad-quit", "QUIT", Map.of("extra", "value"))));
+        assertFalse(readResponse(input).success());
+        output.println(MessageCodec.encode(new Request("still-connected", "PING", Map.of())));
+        assertEquals("still-connected", readResponse(input).requestId());
+        output.println("QUIT");
+        handler.get(3, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void rejectsBlankClientName() throws Exception {
+        Socket client = connect();
+        Future<?> handler = startHandler();
+        PrintWriter output = new PrintWriter(client.getOutputStream(), true);
+        output.println("   ");
+        output.println("CLIENT");
+        BufferedReader input = reader(client);
+        assertFalse(readResponse(input).success());
+        handler.get(3, TimeUnit.SECONDS);
+        assertNull(input.readLine());
+        assertTrue(registry.getConnectedClients().isEmpty());
+        assertTrue(events.isEmpty());
+    }
+
+    @Test
+    void rejectsHandshakeThatEndsBeforeRole() throws Exception {
+        Socket client = connect();
+        Future<?> handler = startHandler();
+        PrintWriter output = new PrintWriter(client.getOutputStream(), true);
+        output.println("unfinished");
+        client.shutdownOutput();
+        BufferedReader input = reader(client);
+        assertFalse(readResponse(input).success());
+        handler.get(3, TimeUnit.SECONDS);
+        assertNull(input.readLine());
+        assertTrue(registry.getConnectedClients().isEmpty());
+        assertTrue(events.isEmpty());
     }
 
     @Test
