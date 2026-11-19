@@ -36,6 +36,25 @@ The server *should* be able to handle many clients so you can launch as many as 
     
     Once running you will be prompted for a client name, client type and port to connect to. Type `QUIT` to quit.
 
+## communication commands
+
+reload the maven project in intellij before running, so gson and junit are available.
+use java 17 or later. allow multiple instances in the client run configuration
+to try two terminals at once.
+
+| command | result |
+| --- | --- |
+| `ping` | server replies with `pong` and the matching request id |
+| `list_clients` | admin sees the currently connected terminal names |
+| `help` | prints the available commands locally |
+| `quit` | receives a goodbye response and disconnects |
+
+clients display join/leave notifications without waiting for keyboard input.
+transport, cargo and resource commands are not connected yet.
+
+run automated tests with `mvn test`, or run `src/test/java` in intellij.
+see [protocol notes](docs/protocol.md) and [test coverage](docs/testing.md).
+
 ## Todo
 - [x] Server setup
 - [x] Client setup
