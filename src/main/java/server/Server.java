@@ -18,6 +18,18 @@ public class Server {
     private ServerSocket serverSocket;
     private final ExecutorService pool = Executors.newCachedThreadPool();
     private final ClientRegistry registry = new ClientRegistry();
+    private final TransportRegistry transports;
+    private final CommandDispatcher dispatcher;
+
+    public Server() {
+        this(new TransportRegistry());
+    }
+
+    public Server(TransportRegistry transports) {
+        // persistence can populate this before the server starts accepting connections
+        this.transports = transports;
+        this.dispatcher = new CommandDispatcher(registry, transports);
+    }
 
     // Services can go here, should make sure all use synchronized methods!!!!
     ClientLogService clientLogService = new ClientLogServiceImpl();
@@ -32,7 +44,7 @@ public class Server {
         while(true) {
             try {
                 Socket socket = serverSocket.accept();
-                pool.submit(new ClientHandler(socket, clientLogService, registry));
+                pool.submit(new ClientHandler(socket, clientLogService, registry, dispatcher));
             } catch (IOException e) {
                 System.out.println(RED + "Failed to handle Client connection" + DEFAULT);
             }

@@ -53,12 +53,12 @@ public class Client {
             Thread listener = new Thread(new ServerMessageListener(in, Client::displayMessage, System.out::println), "server-listener");
             listener.setDaemon(true);
             listener.start();
-            System.out.println("commands: ping, list_clients (admin), help, quit");
+            printHelp();
 
             while (!socket.isClosed() && scanner.hasNextLine()) {
                 String line = scanner.nextLine().trim();
                 if (line.equalsIgnoreCase("HELP")) {
-                    System.out.println("commands: ping, list_clients (admin), help, quit");
+                    printHelp();
                     continue;
                 }
                 try {
@@ -84,6 +84,10 @@ public class Client {
         } catch (IllegalArgumentException e) {
             System.out.println("invalid handshake from server");
         }
+    }
+
+    private static void printHelp() {
+        System.out.println("commands: ping, view_transports, list_clients (admin), help, quit");
     }
 
     private static void displayMessage(Message message) {

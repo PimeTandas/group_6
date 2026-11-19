@@ -29,10 +29,15 @@ public class ClientHandler implements Runnable {
     }
 
     public ClientHandler(Socket socket, ClientLogService clientLogService, ClientRegistry registry) {
+        this(socket, clientLogService, registry, new CommandDispatcher(registry));
+    }
+
+    public ClientHandler(Socket socket, ClientLogService clientLogService, ClientRegistry registry,
+                         CommandDispatcher dispatcher) {
         this.socket = socket;
         this.clientLogService = clientLogService;
         this.registry = registry;
-        this.dispatcher = new CommandDispatcher(registry);
+        this.dispatcher = dispatcher;
     }
 
     @Override
