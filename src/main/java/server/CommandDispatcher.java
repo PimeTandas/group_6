@@ -1,14 +1,15 @@
 package server;
 
 import enums.ClientType;
-import domains.Transporter;
 import protocol.EventMessage;
 import protocol.Request;
 import protocol.Response;
 import service.CargoService;
 import service.CargoServiceImpl;
 import service.EventLogService;
-import java.util.HashMap;
+import service.SpaceportService;
+import java.time.LocalDateTime;
+import java.time.DateTimeException;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -16,9 +17,7 @@ import java.util.Set;
 
 public class CommandDispatcher {
     private final ClientRegistry registry;
-    private final TransportRegistry transports;
-    private final CargoService cargo;
-    private final EventLogService eventLog;
+    private final SpaceportService spaceport;
 
     public CommandDispatcher(ClientRegistry registry) {
         this(registry, new TransportRegistry());
@@ -30,14 +29,33 @@ public class CommandDispatcher {
 
     public CommandDispatcher(ClientRegistry registry, TransportRegistry transports,
                              CargoService cargo, EventLogService eventLog) {
+        this(registry, new SpaceportService(transports, cargo, eventLog));
+    }
+
+    public CommandDispatcher(ClientRegistry registry, SpaceportService spaceport) {
         this.registry = registry;
-        this.transports = transports;
-        this.cargo = cargo;
-        this.eventLog = eventLog;
+        this.spaceport = spaceport;
     }
 
     public Response dispatch(Request request, ClientType clientType) {
         String command = request.command().toUpperCase(Locale.ROOT);
+        if (command.equals("ADD_TRANSPORT")) {
+            if (clientType != ClientType.ADMIN) {
+                return new Response(request.requestId(), false, "admin role required", List.of());
+            }
+            try {
+                requireArguments(request, Set.of("transport", "capacity", "departure"));
+                EventMessage event = spaceport.addTransport(request.arguments().get("transport"),
+                        Integer.parseInt(request.arguments().get("capacity")),
+                        LocalDateTime.parse(request.arguments().get("departure")), request.requestId());
+                registry.broadcast(event);
+                return new Response(request.requestId(), true, "transport added", List.of());
+            } catch (DateTimeException e) {
+                return new Response(request.requestId(), false, "departure must use yyyy-MM-ddTHH:mm[:ss]", List.of());
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return new Response(request.requestId(), false, e.getMessage(), List.of());
+            }
+        }
         if (Set.of("LOAD_CARGO", "UNLOAD_CARGO", "TRANSFER_CARGO").contains(command)) {
             try {
                 return cargoCommand(request, command);
@@ -53,9 +71,15 @@ public class CommandDispatcher {
             case "PING" -> new Response(request.requestId(), true, "pong", List.of());
             case "QUIT" -> new Response(request.requestId(), true, "goodbye", List.of());
             case "VIEW_TRANSPORTS" -> new Response(request.requestId(), true, "transports",
-                    transports.getAll().stream().map(this::describeTransport).toList());
+                    spaceport.getTransports().stream().map(this::describeTransport).toList());
+            case "VIEW_BAYS" -> new Response(request.requestId(), true, "docking bays",
+                    spaceport.getBays().stream().map(bay -> bay.id() + " status=" + bay.status()
+                            + " transport=" + orNone(bay.transportId())).toList());
+            case "VIEW_TEAMS" -> new Response(request.requestId(), true, "maintenance teams",
+                    spaceport.getTeams().stream().map(team -> team.id() + " status=" + team.status()
+                            + " transport=" + orNone(team.transportId())).toList());
             case "VIEW_EVENTS" -> new Response(request.requestId(), true, "events",
-                    eventLog.getEvents().stream().map(event -> event.timestamp() + " "
+                    spaceport.getEvents().stream().map(event -> event.timestamp() + " "
                             + event.eventType() + " " + event.details()).toList());
             case "LIST_CLIENTS" -> clientType == ClientType.ADMIN
                     ? new Response(request.requestId(), true, "connected clients", registry.getConnectedClients())
@@ -68,41 +92,40 @@ public class CommandDispatcher {
         Map<String, String> arguments = request.arguments();
         Set<String> expected = command.equals("TRANSFER_CARGO")
                 ? Set.of("source", "destination", "amount") : Set.of("transport", "amount");
-        if (!arguments.keySet().equals(expected) || arguments.values().stream().anyMatch(String::isBlank)) {
-            throw new IllegalArgumentException("required arguments: " + expected);
-        }
+        requireArguments(request, expected);
         int amount;
         try {
             amount = Integer.parseInt(arguments.get("amount"));
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("amount must be a whole number within the integer range");
         }
-        // resolve ids here, the cargo service still owns capacity, state and transfer validation
-        switch (command) {
-            case "LOAD_CARGO" -> cargo.loadCargo(transports.get(arguments.get("transport")), amount);
-            case "UNLOAD_CARGO" -> cargo.unloadCargo(transports.get(arguments.get("transport")), amount);
-            case "TRANSFER_CARGO" -> cargo.transferCargo(transports.get(arguments.get("source")),
-                    transports.get(arguments.get("destination")), amount);
+        EventMessage event = switch (command) {
+            case "LOAD_CARGO" -> spaceport.loadCargo(arguments.get("transport"), amount, request.requestId());
+            case "UNLOAD_CARGO" -> spaceport.unloadCargo(arguments.get("transport"), amount, request.requestId());
+            case "TRANSFER_CARGO" -> spaceport.transferCargo(arguments.get("source"),
+                    arguments.get("destination"), amount, request.requestId());
             default -> throw new IllegalArgumentException("unknown cargo command");
-        }
-        Map<String, String> details = new HashMap<>(arguments);
-        details.put("requestId", request.requestId());
-        EventMessage event = EventMessage.now(command, details);
-        // failures return before this point, so only successful changes get a log entry
-        eventLog.record(event);
+        };
         // cargo has released its locks before any socket writes happen
         registry.broadcast(event);
         return new Response(request.requestId(), true, "cargo operation completed", List.of());
     }
 
-    private String describeTransport(Transporter transport) {
-        // cargo uses this same lock, so quantity and state are read together
-        synchronized (transport) {
-            return transport.getTransporterId() + " state=" + transport.getState()
-                    + " cargo=" + transport.getCurrentQuantity() + "/" + transport.getMaxCapacity()
-                    + " bay=" + (transport.getDockingBay() == null ? "none" : transport.getDockingBay().getBayId())
-                    + " team=" + (transport.getMaintenanceTeam() == null ? "none" : transport.getMaintenanceTeam().getMaintenanceId())
-                    + " departure=" + transport.getDepartureTime();
+    private void requireArguments(Request request, Set<String> expected) {
+        if (!request.arguments().keySet().equals(expected)
+                || request.arguments().values().stream().anyMatch(String::isBlank)) {
+            throw new IllegalArgumentException("required arguments: " + expected);
         }
+    }
+
+    private String describeTransport(SpaceportService.TransportView transport) {
+        return transport.id() + " state=" + transport.state()
+                + " cargo=" + transport.quantity() + "/" + transport.capacity()
+                + " bay=" + orNone(transport.bayId()) + " team=" + orNone(transport.teamId())
+                + " departure=" + transport.departure();
+    }
+
+    private String orNone(String id) {
+        return id == null ? "none" : id;
     }
 }

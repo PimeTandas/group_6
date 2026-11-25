@@ -87,7 +87,8 @@ public class Client {
     }
 
     private static void printHelp() {
-        System.out.println("commands: ping, view_transports, view_events, list_clients (admin), help, quit");
+        System.out.println("commands: ping, view_transports, view_bays, view_teams, view_events, list_clients (admin), help, quit");
+        System.out.println("add_transport transport=<id> capacity=<units> departure=<yyyy-MM-ddTHH:mm> (admin)");
         System.out.println("load_cargo transport=<id> amount=<units>");
         System.out.println("unload_cargo transport=<id> amount=<units>");
         System.out.println("transfer_cargo source=<id> destination=<id> amount=<units>");

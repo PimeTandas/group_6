@@ -4,6 +4,7 @@ import service.ClientLogService;
 import service.ClientLogServiceImpl;
 import service.CargoServiceImpl;
 import service.EventLogService;
+import service.SpaceportService;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -20,7 +21,6 @@ public class Server {
     private ServerSocket serverSocket;
     private final ExecutorService pool = Executors.newCachedThreadPool();
     private final ClientRegistry registry = new ClientRegistry();
-    private final TransportRegistry transports;
     private final CommandDispatcher dispatcher;
 
     public Server() {
@@ -32,9 +32,12 @@ public class Server {
     }
 
     public Server(TransportRegistry transports, EventLogService eventLog) {
-        // persistence can populate this before the server starts accepting connections
-        this.transports = transports;
-        this.dispatcher = new CommandDispatcher(registry, transports, new CargoServiceImpl(), eventLog);
+        this(new SpaceportService(transports, new CargoServiceImpl(), eventLog));
+    }
+
+    public Server(SpaceportService spaceport) {
+        // every handler uses the same service and resource objects
+        this.dispatcher = new CommandDispatcher(registry, spaceport);
     }
 
     // Services can go here, should make sure all use synchronized methods!!!!
