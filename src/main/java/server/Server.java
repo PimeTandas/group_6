@@ -10,8 +10,11 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Scanner;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static util.constants.*;
 
@@ -19,7 +22,9 @@ public class Server {
 
     private static final int PORT = 1234;
     private ServerSocket serverSocket;
+    private volatile boolean running;
     private final ExecutorService pool = Executors.newCachedThreadPool();
+    private final Set<Socket> connections = ConcurrentHashMap.newKeySet();
     private final ClientRegistry registry = new ClientRegistry();
     private final CommandDispatcher dispatcher;
 
@@ -40,22 +45,53 @@ public class Server {
         this.dispatcher = new CommandDispatcher(registry, spaceport);
     }
 
-    // Services can go here, should make sure all use synchronized methods!!!!
     ClientLogService clientLogService = new ClientLogServiceImpl();
 
     public void startServer() throws IOException {
         System.out.println(YELLOW + "Starting Space Port Server...");
-        serverSocket = new ServerSocket(PORT);
-        System.out.println("Space Port Server Started..." + DEFAULT);
+        try {
+            serverSocket = new ServerSocket(PORT);
+            running = true;
+            System.out.println("Space Port Server Started..." + DEFAULT);
 
-        startConsoleListener();
+            startConsoleListener();
 
-        while(true) {
+            while (running) {
+                try {
+                    Socket socket = serverSocket.accept();
+                    // track sockets before the handshake, so unfinished connections are closed too
+                    connections.add(socket);
+                    pool.submit(() -> {
+                        try {
+                            new ClientHandler(socket, clientLogService, registry, dispatcher).run();
+                        } finally {
+                            connections.remove(socket);
+                        }
+                    });
+                } catch (IOException e) {
+                    if (running) {
+                        throw e;
+                    }
+                }
+            }
+        } finally {
+            shutdown();
+            // interrupting a handler alone does not unblock a socket read
+            for (Socket socket : connections) {
+                try {
+                    socket.close();
+                } catch (IOException e) {
+                    System.err.println("could not close client socket: " + e.getMessage());
+                }
+            }
+            pool.shutdown();
             try {
-                Socket socket = serverSocket.accept();
-                pool.submit(new ClientHandler(socket, clientLogService, registry, dispatcher));
-            } catch (IOException e) {
-                System.out.println(RED + "Failed to handle Client connection" + DEFAULT);
+                if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    pool.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                pool.shutdownNow();
+                Thread.currentThread().interrupt();
             }
         }
     }
@@ -81,17 +117,17 @@ public class Server {
         console.start();
     }
 
-     // Handle shut down of Space Port Server - closes socket and thread pool
-    private void shutdown() {
+    private synchronized void shutdown() {
+        if (!running) {
+            return;
+        }
+        running = false;
         System.out.println(YELLOW + "Shutting down Space Port Server" + DEFAULT);
         try {
             serverSocket.close();
-            pool.shutdownNow();
-            System.exit(0);
         }
         catch (IOException e) {
-            e.printStackTrace();
-
+            System.err.println("could not close server socket: " + e.getMessage());
         }
     }
 }
