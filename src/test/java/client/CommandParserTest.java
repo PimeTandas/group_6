@@ -1,10 +1,9 @@
 package client;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import protocol.Request;
 import java.util.Map;
+import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CommandParserTest {
@@ -16,9 +15,10 @@ class CommandParserTest {
         assertNotEquals(request.requestId(), CommandParser.parse("ping").requestId());
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"", "  ", "ping extra", "ping =value", "ping name=", "ping a=1 a=2"})
-    void rejectsBadInput(String line) {
-        assertThrows(IllegalArgumentException.class, () -> CommandParser.parse(line));
+    @Test
+    void rejectsBlankCommandsAndMalformedArguments() {
+        for (String line : List.of("", "  ", "ping extra", "ping =value", "ping name=", "ping a=1 a=2")) {
+            assertThrows(IllegalArgumentException.class, () -> CommandParser.parse(line), "input: " + line);
+        }
     }
 }

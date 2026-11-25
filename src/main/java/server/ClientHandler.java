@@ -7,7 +7,6 @@ import service.ClientLogService;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.PrintWriter;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -20,7 +19,7 @@ public class ClientHandler implements Runnable {
     private final ClientRegistry registry;
     private final CommandDispatcher dispatcher;
     private final Object sendLock = new Object();
-    private PrintWriter output;
+    private ClientMessageWriter writer;
     private String clientName;
     private ClientType clientType;
 
@@ -29,19 +28,24 @@ public class ClientHandler implements Runnable {
     }
 
     public ClientHandler(Socket socket, ClientLogService clientLogService, ClientRegistry registry) {
+        this(socket, clientLogService, registry, new CommandDispatcher(registry));
+    }
+
+    public ClientHandler(Socket socket, ClientLogService clientLogService, ClientRegistry registry,
+                         CommandDispatcher dispatcher) {
         this.socket = socket;
         this.clientLogService = clientLogService;
         this.registry = registry;
-        this.dispatcher = new CommandDispatcher(registry);
+        this.dispatcher = dispatcher;
     }
 
     @Override
     public void run() {
         boolean registered = false;
-        try (socket;
-             BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))) {
+        try {
+            BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
             synchronized (sendLock) {
-                output = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8);
+                writer = new ClientMessageWriter(socket);
             }
             // keep the existing two-line handshake while commands use the shared protocol
             socket.setSoTimeout(10000);
@@ -101,23 +105,31 @@ public class ClientHandler implements Runnable {
                 System.err.println("client connection ended: " + e.getMessage());
             }
         } finally {
-            if (registered) {
-                registry.remove(clientName, this);
-                clientLogService.logDisconnected(clientName, clientType);
-                registry.broadcast(EventMessage.now("CLIENT_DISCONNECTED", Map.of("client", clientName)));
+            try {
+                if (registered) {
+                    registry.remove(clientName, this);
+                    clientLogService.logDisconnected(clientName, clientType);
+                    registry.broadcast(EventMessage.now("CLIENT_DISCONNECTED", Map.of("client", clientName)));
+                }
+            } finally {
+                ClientMessageWriter outgoing;
+                synchronized (sendLock) {
+                    outgoing = writer;
+                }
+                if (outgoing != null) {
+                    outgoing.finish();
+                } else {
+                    close();
+                }
             }
         }
     }
 
     public void send(Message message) {
-        // responses and broadcasts share this writer, so each full line needs the same lock
+        // welcome is queued before registration allows any broadcasts to this handler
         synchronized (sendLock) {
-            if (output == null || socket.isClosed()) {
-                return;
-            }
-            output.println(MessageCodec.encode(message));
-            if (output.checkError()) {
-                close();
+            if (writer != null) {
+                writer.send(message);
             }
         }
     }

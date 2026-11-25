@@ -2,14 +2,12 @@ package domains;
 
 import enums.TransportState;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.EnumSource;
 
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertAll;
 
 class TransporterTest {
 
@@ -31,50 +29,36 @@ class TransporterTest {
         assertEquals(TransportState.DEPARTED, transport.getState());
     }
 
-    @ParameterizedTest
-    @CsvSource({
-            "WAITING, SERVICING",
-            "WAITING, READY",
-            "WAITING, DEPARTED",
-            "DOCKED, READY",
-            "DOCKED, DEPARTED",
-            "SERVICING, DEPARTED",
-            "DOCKED, WAITING",
-            "SERVICING, WAITING",
-            "SERVICING, DOCKED",
-            "READY, WAITING",
-            "READY, DOCKED",
-            "READY, SERVICING",
-            "DEPARTED, WAITING",
-            "DEPARTED, DOCKED",
-            "DEPARTED, SERVICING",
-            "DEPARTED, READY"
-    })
-    void rejectsInvalidTransitionWithoutChangingState(TransportState start, TransportState next) {
-        Transporter transport = new Transporter("t1", start,
-                null, 100, 0, LocalDateTime.of(2026, 11, 30, 12, 0), null);
-
-        assertThrows(IllegalStateException.class, () -> transport.setState(next));
-        assertEquals(start, transport.getState());
+    @Test
+    void rejectsSkippedBackwardAndPostDepartureTransitions() {
+        TransportState[][] invalid = {
+                {TransportState.WAITING, TransportState.READY},
+                {TransportState.DOCKED, TransportState.DEPARTED},
+                {TransportState.SERVICING, TransportState.DEPARTED},
+                {TransportState.READY, TransportState.DOCKED},
+                {TransportState.DEPARTED, TransportState.WAITING}
+        };
+        // representative failures cover skipping stages, going backwards and restarting after departure
+        for (TransportState[] transition : invalid) {
+            TransportState start = transition[0];
+            TransportState next = transition[1];
+            Transporter transport = new Transporter("t1", start,
+                    null, 100, 0, LocalDateTime.of(2026, 11, 30, 12, 0), null);
+            assertAll(start + " -> " + next,
+                    () -> assertThrows(IllegalStateException.class, () -> transport.setState(next)),
+                    () -> assertEquals(start, transport.getState()));
+        }
     }
 
-    @ParameterizedTest
-    @EnumSource(TransportState.class)
-    void rejectsRepeatedState(TransportState state) {
-        Transporter transport = new Transporter("t1", state,
-                null, 100, 0, LocalDateTime.of(2026, 11, 30, 12, 0), null);
-
-        assertThrows(IllegalStateException.class, () -> transport.setState(state));
-        assertEquals(state, transport.getState());
-    }
-
-    @ParameterizedTest
-    @EnumSource(TransportState.class)
-    void rejectsNullState(TransportState state) {
-        Transporter transport = new Transporter("t1", state,
-                null, 100, 0, LocalDateTime.of(2026, 11, 30, 12, 0), null);
-
-        assertThrows(IllegalStateException.class, () -> transport.setState(null));
-        assertEquals(state, transport.getState());
+    @Test
+    void rejectsRepeatedAndMissingStates() {
+        for (TransportState state : TransportState.values()) {
+            Transporter transport = new Transporter("t1", state,
+                    null, 100, 0, LocalDateTime.of(2026, 11, 30, 12, 0), null);
+            assertAll(state.toString(),
+                    () -> assertThrows(IllegalStateException.class, () -> transport.setState(state)),
+                    () -> assertThrows(IllegalStateException.class, () -> transport.setState(null)),
+                    () -> assertEquals(state, transport.getState()));
+        }
     }
 }

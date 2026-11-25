@@ -2,6 +2,9 @@ package server;
 
 import service.ClientLogService;
 import service.ClientLogServiceImpl;
+import service.CargoServiceImpl;
+import service.EventLogService;
+import service.SpaceportService;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -18,6 +21,24 @@ public class Server {
     private ServerSocket serverSocket;
     private final ExecutorService pool = Executors.newCachedThreadPool();
     private final ClientRegistry registry = new ClientRegistry();
+    private final CommandDispatcher dispatcher;
+
+    public Server() {
+        this(new TransportRegistry());
+    }
+
+    public Server(TransportRegistry transports) {
+        this(transports, new EventLogService());
+    }
+
+    public Server(TransportRegistry transports, EventLogService eventLog) {
+        this(new SpaceportService(transports, new CargoServiceImpl(), eventLog));
+    }
+
+    public Server(SpaceportService spaceport) {
+        // every handler uses the same service and resource objects
+        this.dispatcher = new CommandDispatcher(registry, spaceport);
+    }
 
     // Services can go here, should make sure all use synchronized methods!!!!
     ClientLogService clientLogService = new ClientLogServiceImpl();
@@ -32,7 +53,7 @@ public class Server {
         while(true) {
             try {
                 Socket socket = serverSocket.accept();
-                pool.submit(new ClientHandler(socket, clientLogService, registry));
+                pool.submit(new ClientHandler(socket, clientLogService, registry, dispatcher));
             } catch (IOException e) {
                 System.out.println(RED + "Failed to handle Client connection" + DEFAULT);
             }
