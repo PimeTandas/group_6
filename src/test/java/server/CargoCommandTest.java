@@ -5,8 +5,6 @@ import enums.ClientType;
 import enums.TransportState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import protocol.Request;
 import protocol.Response;
 import service.CargoServiceImpl;
@@ -14,6 +12,7 @@ import service.EventLogService;
 
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -51,22 +50,25 @@ class CargoCommandTest {
         assertEquals(3, eventLog.getEvents().size());
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"0", "-1", "1.5", "abc", "2147483648", "101"})
-    void rejectedAmountsLeaveCargoAndLogUnchanged(String amount) {
-        Response reply = send("bad-amount", "LOAD_CARGO", Map.of("transport", "a", "amount", amount));
-        assertFalse(reply.success());
-        assertEquals("bad-amount", reply.requestId());
-        assertEquals(20, transports.get("a").getCurrentQuantity());
-        assertTrue(eventLog.getEvents().isEmpty());
-    }
-
     @Test
-    void rejectsMissingExtraAndUnknownArguments() {
+    void invalidCargoRequestsLeaveStateAndLogUnchanged() {
+        for (String amount : List.of("0", "-1", "1.5", "abc", "2147483648", "101")) {
+            Response reply = send("bad-amount", "LOAD_CARGO", Map.of("transport", "a", "amount", amount));
+            assertAll("amount: " + amount,
+                    () -> assertFalse(reply.success()),
+                    () -> assertEquals("bad-amount", reply.requestId()),
+                    () -> assertEquals(20, transports.get("a").getCurrentQuantity()),
+                    () -> assertTrue(eventLog.getEvents().isEmpty()));
+        }
         assertFalse(send("missing", "LOAD_CARGO", Map.of("transport", "a")).success());
         assertFalse(send("extra", "LOAD_CARGO", Map.of("transport", "a", "amount", "1", "extra", "x")).success());
         assertFalse(send("unknown", "LOAD_CARGO", Map.of("transport", "missing", "amount", "1")).success());
         assertFalse(send("blank", "LOAD_CARGO", Map.of("transport", " ", "amount", "1")).success());
+        transports.register(new Transporter("waiting", TransportState.WAITING, null, 100, 0,
+                LocalDateTime.of(2026, 11, 30, 12, 0), null));
+        assertFalse(send("waiting", "LOAD_CARGO", Map.of("transport", "waiting", "amount", "1")).success());
+        assertEquals(0, transports.get("waiting").getCurrentQuantity());
+        assertEquals(20, transports.get("a").getCurrentQuantity());
         assertTrue(eventLog.getEvents().isEmpty());
     }
 
@@ -80,12 +82,4 @@ class CargoCommandTest {
         assertTrue(eventLog.getEvents().isEmpty());
     }
 
-    @Test
-    void rejectsCargoWhenTransportIsWaiting() {
-        transports.register(new Transporter("waiting", TransportState.WAITING, null, 100, 0,
-                LocalDateTime.of(2026, 11, 30, 12, 0), null));
-        assertFalse(send("waiting", "LOAD_CARGO", Map.of("transport", "waiting", "amount", "1")).success());
-        assertEquals(0, transports.get("waiting").getCurrentQuantity());
-        assertTrue(eventLog.getEvents().isEmpty());
-    }
 }
