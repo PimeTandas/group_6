@@ -22,6 +22,8 @@ public class SpaceportService {
     private final EventLogService eventLog;
     private final List<DockingBay> bays;
     private final List<MaintenanceTeam> teams;
+    private final DockingService docking = new DockingServiceImpl();
+    private final MaintenanceService maintenance = new MaintenanceServiceImpl();
 
     public SpaceportService(TransportRegistry transports) {
         this(transports, new CargoServiceImpl(), new EventLogService());
@@ -106,6 +108,101 @@ public class SpaceportService {
                         transport.getDepartureTime());
             }
         }).toList();
+    }
+
+    public EventMessage allocateBay(String transportId, String bayId, String requestId) {
+        Transporter transport = transports.get(transportId);
+        DockingBay bay = findBay(bayId);
+        synchronized (transport) {
+            synchronized (bay) {
+                return recordChange("ALLOCATE_BAY", Map.of("transport", transportId, "bay", bayId, "requestId", requestId),
+                        () -> docking.allocateBay(transport, bay));
+            }
+        }
+    }
+
+    public EventMessage exchangeBays(String firstId, String secondId, String requestId) {
+        Transporter first = transports.get(firstId);
+        Transporter second = transports.get(secondId);
+        Transporter low = firstId.compareTo(secondId) < 0 ? first : second;
+        Transporter high = low == first ? second : first;
+        // keep the same transport and bay order as the docking service
+        synchronized (low) {
+            synchronized (high) {
+                DockingBay firstBay = first.getDockingBay();
+                DockingBay secondBay = second.getDockingBay();
+                if (firstBay == null || secondBay == null) {
+                    throw new IllegalStateException("both transports must have a docking bay");
+                }
+                DockingBay lowBay = firstBay.getBayId().compareTo(secondBay.getBayId()) < 0 ? firstBay : secondBay;
+                DockingBay highBay = lowBay == firstBay ? secondBay : firstBay;
+                synchronized (lowBay) {
+                    synchronized (highBay) {
+                        return recordChange("EXCHANGE_BAYS", Map.of("first", firstId, "second", secondId,
+                                "firstBay", firstBay.getBayId(), "secondBay", secondBay.getBayId(), "requestId", requestId),
+                                () -> docking.exchangeBays(first, second));
+                    }
+                }
+            }
+        }
+    }
+
+    public EventMessage assignTeam(String transportId, String teamId, String requestId) {
+        Transporter transport = transports.get(transportId);
+        MaintenanceTeam team = findTeam(teamId);
+        synchronized (transport) {
+            synchronized (team) {
+                return recordChange("ASSIGN_TEAM", Map.of("transport", transportId, "team", teamId, "requestId", requestId),
+                        () -> maintenance.assignTeam(transport, team));
+            }
+        }
+    }
+
+    public EventMessage completeMaintenance(String transportId, String requestId) {
+        Transporter transport = transports.get(transportId);
+        synchronized (transport) {
+            MaintenanceTeam team = transport.getMaintenanceTeam();
+            if (team == null) {
+                throw new IllegalStateException("transport is not being serviced");
+            }
+            synchronized (team) {
+                return recordChange("COMPLETE_MAINTENANCE", Map.of("transport", transportId,
+                        "team", team.getMaintenanceId(), "requestId", requestId),
+                        () -> maintenance.completeMaintenance(transport));
+            }
+        }
+    }
+
+    public EventMessage closeBay(String bayId, String requestId) {
+        DockingBay bay = findBay(bayId);
+        synchronized (bay) {
+            return recordChange("CLOSE_BAY", Map.of("bay", bayId, "requestId", requestId), () -> docking.closeBay(bay));
+        }
+    }
+
+    public EventMessage reopenBay(String bayId, String requestId) {
+        DockingBay bay = findBay(bayId);
+        synchronized (bay) {
+            return recordChange("REOPEN_BAY", Map.of("bay", bayId, "requestId", requestId), () -> docking.reopenBay(bay));
+        }
+    }
+
+    private DockingBay findBay(String id) {
+        return bays.stream().filter(bay -> bay.getBayId().equals(id)).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("unknown docking bay: " + id));
+    }
+
+    private MaintenanceTeam findTeam(String id) {
+        return teams.stream().filter(team -> team.getMaintenanceId().equals(id)).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("unknown maintenance team: " + id));
+    }
+
+    private EventMessage recordChange(String type, Map<String, String> details, Runnable operation) {
+        EventMessage event = EventMessage.now(type, details);
+        operation.run();
+        // callers hold the affected resource locks until the successful change is logged
+        eventLog.record(event);
+        return event;
     }
 
     public List<EventMessage> getEvents() {

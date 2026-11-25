@@ -120,6 +120,11 @@ public class Client {
         System.out.println("load_cargo transport=<id> amount=<units>");
         System.out.println("unload_cargo transport=<id> amount=<units>");
         System.out.println("transfer_cargo source=<id> destination=<id> amount=<units>");
+        System.out.println("allocate_bay transport=<id> bay=<id>");
+        System.out.println("exchange_bays first=<transport-id> second=<transport-id>");
+        System.out.println("assign_team transport=<id> team=<id>");
+        System.out.println("complete_maintenance transport=<id>");
+        System.out.println("close_bay bay=<id> / reopen_bay bay=<id> (admin)");
     }
 
     private static void displayMessage(Message message) {

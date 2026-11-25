@@ -39,6 +39,17 @@ public class CommandDispatcher {
 
     public Response dispatch(Request request, ClientType clientType) {
         String command = request.command().toUpperCase(Locale.ROOT);
+        if (Set.of("ALLOCATE_BAY", "EXCHANGE_BAYS", "ASSIGN_TEAM", "COMPLETE_MAINTENANCE",
+                "CLOSE_BAY", "REOPEN_BAY").contains(command)) {
+            if ((command.equals("CLOSE_BAY") || command.equals("REOPEN_BAY")) && clientType != ClientType.ADMIN) {
+                return new Response(request.requestId(), false, "admin role required", List.of());
+            }
+            try {
+                return resourceCommand(request, command);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return new Response(request.requestId(), false, e.getMessage(), List.of());
+            }
+        }
         if (command.equals("ADD_TRANSPORT")) {
             if (clientType != ClientType.ADMIN) {
                 return new Response(request.requestId(), false, "admin role required", List.of());
@@ -116,6 +127,30 @@ public class CommandDispatcher {
                 || request.arguments().values().stream().anyMatch(String::isBlank)) {
             throw new IllegalArgumentException("required arguments: " + expected);
         }
+    }
+
+    private Response resourceCommand(Request request, String command) {
+        Set<String> expected = switch (command) {
+            case "ALLOCATE_BAY" -> Set.of("transport", "bay");
+            case "EXCHANGE_BAYS" -> Set.of("first", "second");
+            case "ASSIGN_TEAM" -> Set.of("transport", "team");
+            case "COMPLETE_MAINTENANCE" -> Set.of("transport");
+            default -> Set.of("bay");
+        };
+        requireArguments(request, expected);
+        Map<String, String> args = request.arguments();
+        String id = request.requestId();
+        EventMessage event = switch (command) {
+            case "ALLOCATE_BAY" -> spaceport.allocateBay(args.get("transport"), args.get("bay"), id);
+            case "EXCHANGE_BAYS" -> spaceport.exchangeBays(args.get("first"), args.get("second"), id);
+            case "ASSIGN_TEAM" -> spaceport.assignTeam(args.get("transport"), args.get("team"), id);
+            case "COMPLETE_MAINTENANCE" -> spaceport.completeMaintenance(args.get("transport"), id);
+            case "CLOSE_BAY" -> spaceport.closeBay(args.get("bay"), id);
+            case "REOPEN_BAY" -> spaceport.reopenBay(args.get("bay"), id);
+            default -> throw new IllegalArgumentException("unknown resource command");
+        };
+        registry.broadcast(event);
+        return new Response(id, true, "resource operation completed", List.of());
     }
 
     private String describeTransport(SpaceportService.TransportView transport) {
