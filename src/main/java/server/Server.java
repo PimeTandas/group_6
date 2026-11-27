@@ -5,13 +5,17 @@ import service.ClientLogServiceImpl;
 import service.CargoServiceImpl;
 import service.EventLogService;
 import service.SpaceportService;
-import data.InitialDataLoader;
+import domains.DockingBay;
+import domains.MaintenanceTeam;
+import enums.BayStatus;
+import enums.MaintenanceStatus;
 
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Scanner;
 import java.util.Set;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -29,8 +33,14 @@ public class Server {
     private final ClientRegistry registry = new ClientRegistry();
     private final CommandDispatcher dispatcher;
 
-    public Server() throws IOException {
-        this(InitialDataLoader.load());
+    public Server() {
+        // starter resources let terminals use the services before saved data is available
+        this(new SpaceportService(new TransportRegistry(), new CargoServiceImpl(), new EventLogService(),
+                List.of(new DockingBay("BAY-1", BayStatus.AVAILABLE, null),
+                        new DockingBay("BAY-2", BayStatus.AVAILABLE, null),
+                        new DockingBay("BAY-3", BayStatus.AVAILABLE, null)),
+                List.of(new MaintenanceTeam("TEAM-1", MaintenanceStatus.AVAILABLE, null),
+                        new MaintenanceTeam("TEAM-2", MaintenanceStatus.AVAILABLE, null))));
     }
 
     public Server(TransportRegistry transports) {
