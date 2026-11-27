@@ -14,6 +14,9 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.Scanner;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 import static util.constants.*;
 
@@ -55,31 +58,56 @@ public class Client {
             listener.start();
             printHelp();
 
-            while (!socket.isClosed() && scanner.hasNextLine()) {
-                String line = scanner.nextLine().trim();
-                if (line.equalsIgnoreCase("HELP")) {
-                    printHelp();
-                    continue;
-                }
+            BlockingQueue<String> commands = new LinkedBlockingQueue<>(32);
+            // console input can block, so keep it separate from checking the connection
+            Thread keyboard = new Thread(() -> {
                 try {
-                    Request request = CommandParser.parse(line);
-                    out.println(MessageCodec.encode(request));
-                    if (out.checkError()) {
-                        System.out.println("could not send command, connection closed");
-                        break;
+                    while (scanner.hasNextLine()) {
+                        commands.put(scanner.nextLine());
                     }
-                    if (request.command().equals("QUIT") && request.arguments().isEmpty()) {
-                        // allow the reader to display the goodbye response before closing the socket
-                        socket.shutdownOutput();
-                        listener.join(3000);
-                        break;
-                    }
-                } catch (IllegalArgumentException e) {
-                    System.out.println(e.getMessage());
+                    commands.put("QUIT");
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    break;
                 }
+            }, "console-reader");
+            keyboard.setDaemon(true);
+            keyboard.start();
+
+            try {
+                while (listener.isAlive()) {
+                    String line = commands.poll(200, TimeUnit.MILLISECONDS);
+                    if (line == null) {
+                        continue;
+                    }
+                    if (!listener.isAlive()) {
+                        break;
+                    }
+                    line = line.trim();
+                    if (line.equalsIgnoreCase("HELP")) {
+                        printHelp();
+                        continue;
+                    }
+                    try {
+                        Request request = CommandParser.parse(line);
+                        out.println(MessageCodec.encode(request));
+                        if (out.checkError()) {
+                            System.out.println("could not send command, connection closed");
+                            break;
+                        }
+                        if (request.command().equals("QUIT") && request.arguments().isEmpty()) {
+                            // allow the reader to display the goodbye response before closing the socket
+                            socket.shutdownOutput();
+                            listener.join(3000);
+                            break;
+                        }
+                    } catch (IllegalArgumentException e) {
+                        System.out.println(e.getMessage());
+                    }
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                keyboard.interrupt();
             }
         } catch (IllegalArgumentException e) {
             System.out.println("invalid handshake from server");
@@ -92,6 +120,11 @@ public class Client {
         System.out.println("load_cargo transport=<id> amount=<units>");
         System.out.println("unload_cargo transport=<id> amount=<units>");
         System.out.println("transfer_cargo source=<id> destination=<id> amount=<units>");
+        System.out.println("allocate_bay transport=<id> bay=<id>");
+        System.out.println("exchange_bays first=<transport-id> second=<transport-id>");
+        System.out.println("assign_team transport=<id> team=<id>");
+        System.out.println("complete_maintenance transport=<id>");
+        System.out.println("close_bay bay=<id> / reopen_bay bay=<id> (admin)");
     }
 
     private static void displayMessage(Message message) {
