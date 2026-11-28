@@ -115,7 +115,7 @@ public class Client {
     }
 
     private static void printHelp() {
-        System.out.println("commands: ping, view_transports, view_bays, view_teams, view_events, list_clients (admin), help, quit");
+        System.out.println(YELLOW + "commands: ping, view_transports, view_bays, view_teams, view_events, list_clients (admin), help, quit");
         System.out.println("add_transport transport=<id> capacity=<units> departure=<yyyy-MM-ddTHH:mm> (admin)");
         System.out.println("load_cargo transport=<id> amount=<units>");
         System.out.println("unload_cargo transport=<id> amount=<units>");
@@ -124,7 +124,7 @@ public class Client {
         System.out.println("exchange_bays first=<transport-id> second=<transport-id>");
         System.out.println("assign_team transport=<id> team=<id>");
         System.out.println("complete_maintenance transport=<id>");
-        System.out.println("close_bay bay=<id> / reopen_bay bay=<id> (admin)");
+        System.out.println("close_bay bay=<id> / reopen_bay bay=<id> (admin)" + DEFAULT);
     }
 
     private static void displayMessage(Message message) {

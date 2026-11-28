@@ -3,6 +3,7 @@ package service;
 import domains.Transporter;
 
 import java.time.LocalDateTime;
+import java.util.function.Supplier;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -15,7 +16,7 @@ public class DepartureScheduler implements Runnable {
     }
 
     private final DockingService dockingService;
-    private final List<Transporter> transports;
+    private final Supplier<List<Transporter>> transports;
     private final long checkEveryMillis;
 
     private DepartureListener listener;
@@ -23,7 +24,7 @@ public class DepartureScheduler implements Runnable {
     private boolean running = false;
 
     public DepartureScheduler(DockingService dockingService,
-                              List<Transporter> transports,
+                              Supplier<List<Transporter>> transports,
                               long checkEveryMillis) {
         this.dockingService = dockingService;
         this.transports = transports;
@@ -39,8 +40,9 @@ public class DepartureScheduler implements Runnable {
             throw new IllegalStateException("Departure scheduler is already running.");
         }
         running = true;
-        thread = new Thread(this);
+        thread = new Thread(this, "departure-scheduler");
         thread.start();
+
     }
 
     // tells the thread to stop and waits for it, so a departure that is
@@ -56,6 +58,7 @@ public class DepartureScheduler implements Runnable {
 
         if (threadToWaitFor != null) {
             try {
+                threadToWaitFor.interrupt();
                 threadToWaitFor.join();
             } catch (InterruptedException e) {
                 e.printStackTrace();
@@ -82,11 +85,7 @@ public class DepartureScheduler implements Runnable {
     // one check of every transport, public so the tests can call it directly
     public void checkNow() {
 
-        // copy the list so other threads can add transports while we loop
-        List<Transporter> copy;
-        synchronized (transports) {
-            copy = new ArrayList<>(transports);
-        }
+        List<Transporter> copy = transports.get();
 
         LocalDateTime now = LocalDateTime.now();
 

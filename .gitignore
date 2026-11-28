@@ -36,3 +36,7 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+saved-data/
+src/main/resources/data/persistence/
+src/main/resources/data/clients.log

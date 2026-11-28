@@ -10,7 +10,11 @@ import server.TransportRegistry;
 import service.CargoServiceImpl;
 import service.EventLogService;
 import service.SpaceportService;
+import protocol.EventMessage;
+import protocol.MessageCodec;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,10 +28,27 @@ import java.util.List;
 import java.util.Map;
 
 public class InitialDataLoader {
+    private static final List<String> PERISTEDFILES = List.of("docking.csv", "maintenance.csv", "transports.csv");
+    public static final String EVENTLOG = "events.log";
+
     public static SpaceportService load() throws IOException {
+        return load(null);
+    }
+
+    public static SpaceportService load(Path savedDir) throws IOException {
+        long savedFiles = savedDir == null ? 0 : PERISTEDFILES.stream().filter(name -> Files.exists(savedDir.resolve(name))).count();
+        if (savedFiles != 0 && savedFiles != PERISTEDFILES.size()) {
+            throw new IOException("saved data in " + savedDir + " is incomplete");
+        }
+        Path source = savedFiles == 0 ? null : savedDir;
+        System.out.println(source == null ? "Loading supplied sample data" : "Loading saved data from " + source);
+        return build(source);
+    }
+
+    private static SpaceportService build(Path source) throws IOException {
         try {
-            List<String[]> bayRows = readRows("docking.csv", 3);
-            List<String[]> teamRows = readRows("maintenance.csv", 3);
+            List<String[]> bayRows = readRows(source, "docking.csv", 3);
+            List<String[]> teamRows = readRows(source, "maintenance.csv", 3);
             Map<String, DockingBay> bays = new LinkedHashMap<>();
             for (String[] row : bayRows) {
                 checkId(row[0]);
@@ -45,7 +66,7 @@ public class InitialDataLoader {
                 }
             }
             TransportRegistry transports = new TransportRegistry();
-            for (String[] row : readRows("transports.csv", 7)) {
+            for (String[] row : readRows(source, "transports.csv", 7)) {
                 checkId(row[0]);
                 TransportState state = TransportState.valueOf(row[1]);
                 DockingBay bay = row[2].isEmpty() ? null : bays.get(row[2]);
@@ -90,20 +111,42 @@ public class InitialDataLoader {
                     throw new IllegalArgumentException("team allocation does not match transports.csv: " + row[0]);
                 }
             }
-            return new SpaceportService(transports, new CargoServiceImpl(), new EventLogService(),
+            return new SpaceportService(transports, new CargoServiceImpl(), new EventLogService(readEvents(source)),
                     List.copyOf(bays.values()), List.copyOf(teams.values()));
         } catch (IllegalArgumentException | DateTimeException e) {
             throw new IOException("invalid initial data: " + e.getMessage(), e);
         }
     }
 
-    private static List<String[]> readRows(String filename, int columns) throws IOException {
+    private static List<EventMessage> readEvents(Path source) throws IOException {
+        if (source == null || !Files.exists(source.resolve(EVENTLOG))) {
+            return List.of();
+        }
+        List<EventMessage> events = new ArrayList<>();
+        for (String line : Files.readAllLines(source.resolve(EVENTLOG), StandardCharsets.UTF_8)) {
+            if (line.isBlank()) continue;
+            if (!(MessageCodec.decode(line) instanceof EventMessage event)) {
+                throw new IllegalArgumentException("events.log contains a message that is not an event");
+            }
+            events.add(event);
+        }
+        return events;
+    }
+
+    private static BufferedReader open(Path source, String filename) throws IOException {
+        if (source != null) {
+            return Files.newBufferedReader(source.resolve(filename), StandardCharsets.UTF_8);
+        }
         InputStream input = InitialDataLoader.class.getResourceAsStream("/data/" + filename);
         if (input == null) {
             throw new IOException("initial data file was not found: " + filename);
         }
+        return new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
+    }
+
+    private static List<String[]> readRows(Path source, String filename, int columns) throws IOException {
         List<String[]> rows = new ArrayList<>();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
+        try (BufferedReader reader = open(source, filename)) {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (line.isBlank()) continue;
