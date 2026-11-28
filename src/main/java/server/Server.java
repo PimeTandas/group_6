@@ -1,10 +1,7 @@
 package server;
 
-import service.ClientLogService;
-import service.ClientLogServiceImpl;
-import service.CargoServiceImpl;
-import service.EventLogService;
-import service.SpaceportService;
+import service.*;
+import persistance.PersistanceService;
 import data.InitialDataLoader;
 
 import java.io.IOException;
@@ -16,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.nio.file.Path;
 
 import static util.constants.*;
 
@@ -28,22 +26,32 @@ public class Server {
     private final Set<Socket> connections = ConcurrentHashMap.newKeySet();
     private final ClientRegistry registry = new ClientRegistry();
     private final CommandDispatcher dispatcher;
+    private final DepartureScheduler departures;
+    private final SpaceportService spaceport;
+    private final PersistanceService persistence;
 
+    private static final Path SAVELOCATION = Path.of("src", "main", "resources", "data", "persistence");
     public Server() throws IOException {
-        this(InitialDataLoader.load());
+        this(InitialDataLoader.load(SAVELOCATION), new PersistanceService(SAVELOCATION));
+    }
+
+    public Server(SpaceportService spaceport) {
+        this(spaceport, null);
     }
 
     public Server(TransportRegistry transports) {
         this(transports, new EventLogService());
     }
 
-    public Server(TransportRegistry transports, EventLogService eventLog) {
-        this(new SpaceportService(transports, new CargoServiceImpl(), eventLog));
+    public Server(SpaceportService spaceport, PersistanceService persistence) {
+        this.spaceport = spaceport;
+        this.persistence = persistence;
+        this.dispatcher = new CommandDispatcher(registry, spaceport);
+        this.departures = spaceport.createDepartureScheduler(1000, registry::broadcast);
     }
 
-    public Server(SpaceportService spaceport) {
-        // every handler uses the same service and resource objects
-        this.dispatcher = new CommandDispatcher(registry, spaceport);
+    public Server(TransportRegistry transports, EventLogService eventLog) {
+        this(new SpaceportService(transports, new CargoServiceImpl(), eventLog));
     }
 
     ClientLogService clientLogService = new ClientLogServiceImpl();
@@ -52,6 +60,7 @@ public class Server {
         System.out.println(YELLOW + "Starting Space Port Server...");
         try {
             serverSocket = new ServerSocket(PORT);
+            departures.start();
             running = true;
             System.out.println("Space Port Server Started..." + DEFAULT);
 
@@ -76,6 +85,7 @@ public class Server {
                 }
             }
         } finally {
+            departures.stop();
             shutdown();
             // interrupting a handler alone does not unblock a socket read
             for (Socket socket : connections) {
@@ -93,6 +103,9 @@ public class Server {
             } catch (InterruptedException e) {
                 pool.shutdownNow();
                 Thread.currentThread().interrupt();
+            }
+            if (persistence != null && serverSocket != null) {
+                saveState();
             }
         }
     }
@@ -116,6 +129,15 @@ public class Server {
         });
         console.setDaemon(true);
         console.start();
+    }
+
+    private void saveState() {
+        try {
+            persistence.save(spaceport);
+            System.out.println(YELLOW + "Saved data to " + persistence.getDir().toAbsolutePath() + DEFAULT);
+        } catch (IOException e) {
+            System.err.println("failed to save data: " + e.getMessage());
+        }
     }
 
     private synchronized void shutdown() {

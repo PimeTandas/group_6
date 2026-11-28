@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.function.Consumer;
 
 public class SpaceportService {
     private final TransportRegistry transports;
@@ -47,6 +48,9 @@ public class SpaceportService {
     public EventMessage addTransport(String id, int capacity, LocalDateTime departure, String requestId) {
         if (id == null || id.isBlank() || !id.equals(id.trim())) {
             throw new IllegalArgumentException("transport needs an id without surrounding spaces");
+        }
+        if (id.contains(",")) {
+            throw new IllegalArgumentException("transport id cannot contain a comma");
         }
         if (capacity < 0 || departure == null) {
             throw new IllegalArgumentException("capacity must be non-negative and departure time is required");
@@ -231,6 +235,17 @@ public class SpaceportService {
         if (ids.stream().anyMatch(id -> id == null || id.isBlank()) || new HashSet<>(ids).size() != ids.size()) {
             throw new IllegalArgumentException("resource ids must be non-blank and unique");
         }
+    }
+
+    public DepartureScheduler createDepartureScheduler(long checkEveryMillis, Consumer<EventMessage> onDeparture) {
+        DepartureScheduler scheduler = new DepartureScheduler(docking, transports::getAll, checkEveryMillis);
+        scheduler.setListener(transport -> {
+            EventMessage event = EventMessage.now("TRANSPORT_DEPARTED",
+                    Map.of("transport", transport.getTransporterId()));
+            eventLog.record(event);
+            onDeparture.accept(event);
+        });
+        return scheduler;
     }
 
     private EventMessage cargoEvent(String type, String id, int amount, String requestId) {

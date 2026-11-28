@@ -46,7 +46,7 @@ class DepartureSchedulerTest {
         transports.add(notDueYet);
         transports.add(notReady);
 
-        DepartureScheduler scheduler = new DepartureScheduler(docking, transports, 1000);
+        DepartureScheduler scheduler = new DepartureScheduler(docking, () -> transports, 1000);
 
         List<String> departed = new ArrayList<>();
         scheduler.setListener(t -> departed.add(t.getTransporterId()));
@@ -69,7 +69,7 @@ class DepartureSchedulerTest {
         List<Transporter> transports = new ArrayList<>();
         transports.add(transport);
 
-        DepartureScheduler scheduler = new DepartureScheduler(docking, transports, 20);
+        DepartureScheduler scheduler = new DepartureScheduler(docking, () -> transports, 1000);
         scheduler.start();
 
         // wait up to 3 seconds for the background thread to do it
@@ -96,7 +96,7 @@ class DepartureSchedulerTest {
 
         // lots of threads add to this list so it has to be locked when we add
         List<String> departed = new ArrayList<>();
-        DepartureScheduler scheduler = new DepartureScheduler(docking, transports, 1000);
+        DepartureScheduler scheduler = new DepartureScheduler(docking, () -> transports, 1000);
         scheduler.setListener(t -> {
             synchronized (departed) {
                 departed.add(t.getTransporterId());
@@ -135,7 +135,7 @@ class DepartureSchedulerTest {
             Transporter transport = makeReadyTransport("T1", LocalDateTime.now().minusSeconds(1), makeBay("BAY-1"));
             List<Transporter> transports = new ArrayList<>();
             transports.add(transport);
-            DepartureScheduler scheduler = new DepartureScheduler(docking, transports, 1000);
+            DepartureScheduler scheduler = new DepartureScheduler(docking, () -> transports, 1000);
 
             boolean[] loaded = new boolean[1];
 
@@ -174,7 +174,7 @@ class DepartureSchedulerTest {
         transports.add(a);
         transports.add(b);
 
-        DepartureScheduler scheduler = new DepartureScheduler(docking, transports, 1000);
+        DepartureScheduler scheduler = new DepartureScheduler(docking, () -> transports, 1000);
         scheduler.setListener(t -> {
             if (t == a) {
                 throw new RuntimeException("listener broke");
